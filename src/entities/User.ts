@@ -4,7 +4,12 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
+  OneToMany,
+  JoinTable,
+  ManyToMany,
 } from 'typeorm';
+import { Like } from './Like';
 
 @Entity('users')
 export class User {
@@ -14,11 +19,32 @@ export class User {
   @Column({ type: 'varchar', length: 255 })
   firstName: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', nullable: true, length: 255 })
   lastName: string;
 
-  @Column({ type: 'varchar', length: 255, unique: true })
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: 255 })
   email: string;
+
+  @OneToMany(() => Like, (like) => like.user)
+  likes: Like[];
+
+  @ManyToMany(() => User, (user) => user.followers)
+  @JoinTable({
+    name: 'follows',
+    joinColumn: {
+      name: 'follower_id',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'following_id',
+      referencedColumnName: 'id',
+    },
+  })
+  following: User[];
+
+  @ManyToMany(() => User, (user) => user.following)
+  followers: User[];
 
   @CreateDateColumn()
   createdAt: Date;

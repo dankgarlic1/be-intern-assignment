@@ -36,3 +36,16 @@ export const updateUserSchema = Joi.object({
   .messages({
     'object.min': 'At least one field must be provided for update',
   });
+
+export const followUserSchema = Joi.object({
+  followerId: Joi.number().required().positive().messages({
+    'number.base': 'Follower ID must be a number',
+    'number.positive': 'Follower ID must be a positive number',
+    'any.required': 'Follower ID is required',
+  }),
+  followingId: Joi.number().required().positive().messages({
+    'number.base': 'Following ID must be a number',
+    'number.positive': 'Following ID must be a positive number',
+    'any.required': 'Following ID is required',
+  }),
+});
