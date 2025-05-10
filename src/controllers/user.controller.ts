@@ -172,140 +172,40 @@ export class UserController {
   async getUserActivity(req: Request, res: Response) {
     try {
       const userId = parseInt(req.params.id);
-      const { type, startDate, endDate, limit = 10, offset = 0 } = req.query;
+      const { limit = 10, offset = 0 } = req.query;
       const limitNum = Number(limit);
       const offsetNum = Number(offset);
 
-      const user = await this.userRepository.findOneBy({ id: userId });
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: 'Invalid userId format' });
+      }
+
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
       if (!user) {
         return res.status(404).json({ message: 'User not found' });
       }
 
-      const dateFilter: Record<string, any> = {};
-      if (startDate) {
-        const startDateObj = new Date(startDate as string);
-        if (!isNaN(startDateObj.getTime())) {
-          dateFilter.createdAt_gte = startDateObj;
-        }
-      }
-      if (endDate) {
-        const endDateObj = new Date(endDate as string);
-        if (!isNaN(endDateObj.getTime())) {
-          dateFilter.createdAt_lte = endDateObj;
-        }
-      }
+      // Get user posts
+      const posts = await this.postRepository
+        .createQueryBuilder('post')
+        .leftJoinAndSelect('post.author', 'author')
+        .where('post.authorId = :userId', { userId })
+        .orderBy('post.createdAt', 'DESC')
+        .getMany();
 
-      if (type === 'post') {
-        const [posts, count] = await this.postRepository
-          .createQueryBuilder('post')
-          .where('post.author.id = :userId', { userId })
-          .orderBy('post.createdAt', 'DESC')
-          .skip(offsetNum)
-          .take(limitNum)
-          .getManyAndCount();
+      // Get user likes without ordering by createdAt
+      const likes = await this.likeRepository
+        .createQueryBuilder('like')
+        .leftJoinAndSelect('like.post', 'post')
+        .leftJoinAndSelect('post.author', 'author')
+        .where('like.userId = :userId', { userId })
+        .getMany();
 
-        return res.json({
-          activities: posts.map((post) => ({
-            type: 'post',
-            content: post,
-            createdAt: post.createdAt,
-          })),
-          count,
-          limit: limitNum,
-          offset: offsetNum,
-        });
-      } else if (type === 'like') {
-        const [likes, count] = await this.likeRepository
-          .createQueryBuilder('like')
-          .leftJoinAndSelect('like.post', 'post')
-          .leftJoinAndSelect('post.author', 'author')
-          .where('like.user.id = :userId', { userId })
-          .orderBy('like.createdAt', 'DESC')
-          .skip(offsetNum)
-          .take(limitNum)
-          .getManyAndCount();
-
-        return res.json({
-          activities: likes.map((like) => ({
-            type: 'like',
-            content: like.post,
-            createdAt: new Date(),
-          })),
-          count,
-          limit: limitNum,
-          offset: offsetNum,
-        });
-      } else if (type === 'follow') {
-        const [following, followingCount] = await this.userRepository
-          .createQueryBuilder('user')
-          .leftJoinAndSelect('user.following', 'following')
-          .where('user.id = :userId', { userId })
-          .skip(offsetNum)
-          .take(limitNum)
-          .getManyAndCount();
-
-        const [followers, followersCount] = await this.userRepository
-          .createQueryBuilder('follower')
-          .leftJoinAndSelect('follower.following', 'user')
-          .where('user.id = :userId', { userId })
-          .skip(offsetNum)
-          .take(limitNum)
-          .getManyAndCount();
-
-        const followActivities: Activity[] = [];
-
-        if (following.length > 0 && following[0].following) {
-          following[0].following.forEach((followed) => {
-            followActivities.push({
-              type: 'follow',
-              subtype: 'following',
-              content: {
-                user: followed,
-                action: 'followed',
-              },
-              createdAt: followed.createdAt || new Date(),
-            });
-          });
-        }
-
-        followers.forEach((follower) => {
-          followActivities.push({
-            type: 'follow',
-            subtype: 'follower',
-            content: {
-              user: follower,
-              action: 'followed by',
-            },
-            createdAt: follower.createdAt || new Date(),
-          });
-        });
-
-        followActivities.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        const paginatedActivities = followActivities.slice(0, limitNum);
-
-        return res.json({
-          activities: paginatedActivities,
-          count: followingCount + followersCount,
-          limit: limitNum,
-          offset: offsetNum,
-        });
-      }
-
-      const [posts, likes, following, followers] = await Promise.all([
-        this.postRepository
-          .createQueryBuilder('post')
-          .where('post.author.id = :userId', { userId })
-          .orderBy('post.createdAt', 'DESC')
-          .getMany(),
-
-        this.likeRepository
-          .createQueryBuilder('like')
-          .leftJoinAndSelect('like.post', 'post')
-          .leftJoinAndSelect('post.author', 'author')
-          .where('like.user.id = :userId', { userId })
-          .orderBy('like.createdAt', 'DESC')
-          .getMany(),
-
+      // Get user following and followers
+      const [following, followers] = await Promise.all([
         this.userRepository
           .createQueryBuilder('user')
           .leftJoinAndSelect('user.following', 'following')
@@ -333,7 +233,7 @@ export class UserController {
         activities.push({
           type: 'like',
           content: like.post,
-          createdAt: new Date(),
+          createdAt: like.post.createdAt || new Date(), // Use post's createdAt date instead
         });
       });
 
@@ -418,7 +318,7 @@ export class UserController {
 
       const formattedPosts = posts.map((post) => ({
         ...post,
-        likeCount: post.likes.length,
+        likeCount: post.likes?.length || 0,
         likes: undefined,
       }));
 
@@ -480,6 +380,7 @@ export class UserController {
           'author.email',
           'hashtags.id',
           'hashtags.tag',
+          'likes.id',
         ])
         .where('author.id IN (:...followingIds)', { followingIds })
         .orderBy('post.createdAt', 'DESC')
@@ -489,7 +390,7 @@ export class UserController {
 
       const formattedPosts = posts.map((post) => ({
         ...post,
-        likeCount: post.likes.length,
+        likeCount: post.likes?.length || 0,
         likes: undefined,
       }));
 

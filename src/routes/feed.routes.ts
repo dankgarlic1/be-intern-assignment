@@ -6,8 +6,6 @@ import { feedQuerySchema } from '../validations/post.validation';
 export const feedRouter = Router();
 const userController = new UserController();
 
-feedRouter.get(
-  '/',
-  validate(feedQuerySchema, ValidationType.QUERY),
-  userController.getFeedFromQuery
+feedRouter.get('/', validate(feedQuerySchema, ValidationType.QUERY), (req, res) =>
+  userController.getFeedFromQuery(req, res)
 );
